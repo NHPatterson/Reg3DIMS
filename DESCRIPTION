@@ -1,0 +1,17 @@
+Package: Reg3DIMS
+Version: 0.1
+Date: 2019-07-31
+Title: Automated registration of sequential 2D IMS for 3D reconstruction in Cardinal
+Authors@R: person("Nathan 'Heath'", "Patterson", email = "nathan.h.patterson@vanderbilt.edu",
+  role = c("aut", "cre"))
+Maintainer: Nathan 'Heath' Patterson <nathan.h.patterson@vanderbilt.edu>
+Description: This package contains functions create 3D reconstructed data using RNiftyReg registrations of sequential 2D imaging mass spectrometry datasets imported into Cardinal. 
+License: MIT
+LazyData: true
+Imports:
+	Cardinal,
+	RNiftyReg,
+	EBImage
+URL: https://github.com/NHPatterson/Reg3DIMS
+BugReports: https://github.com/NHPatterson/Reg3DIMS/issues
+RoxygenNote: 6.1.1
