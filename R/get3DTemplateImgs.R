@@ -36,14 +36,33 @@ get3DTemplateImgs <- function(ims, canvas_xy= c(700,700), column='PC1'){
     colnames(resultdf)[4] <- column
   }
   
-  if(class(ims)[1] == "MSImagingExperiment"){
+  if(class(ims)[1] %in% c("MSContinuousImagingExperiment","MSSparseImagingExperiment")){
     if(is.numeric(column) == F){
       stop(paste0('The specified column (',column,') for data selection is not numeric and not an m/z'))
     }
-    resultdf <- data.frame(sample = run(ims), 
-                           x = coord(ims)$x, 
-                           y = coord(ims)$y,
-                           mz = iData(ims)[features(ims, mz=column),])
+    
+    reg_images <- list()
+    
+    print_mz <- Cardinal::mz(ims)[features(ims, mz = column)]
+    cat('input m/z : ', column, ' -> extracted , nearest m/z : ', print_mz)
+    
+    for(run in levels(run(ims))){
+      im_mat <- Cardinal::slice(ims[,run(ims) == run], mz=column)
+      
+      #calculate padding
+      xpad_left <- floor((canvas_xy[1] - nrow(im_mat)) / 2)
+      ypad_top <- floor((canvas_xy[2] - ncol(im_mat)) / 2)
+      
+      #empty array
+      reg_images[[run]] <- array(rep(0, canvas_xy[1]*canvas_xy[2]), dim=c(canvas_xy[1],canvas_xy[2]))
+      
+      #fill array (image is now padded)
+      reg_images[[run]][xpad_left:(xpad_left+nrow(im_mat) -1), ypad_top:(ypad_top+ncol(im_mat) -1)] <- im_mat
+      
+      #set NAs to zero
+      reg_images[[run]][is.na(reg_images[[run]])] <- 0
+    }
+    return(reg_images)
   }
   
   
@@ -73,37 +92,37 @@ get3DTemplateImgs <- function(ims, canvas_xy= c(700,700), column='PC1'){
     stop(paste0('specified canvas y size (',canvas_xy[2],') is too small to fit all IMS data extents (',max(sample_xy_max$y),')'))
   }
   
-  if(class(ims)[1] == "MSImagingExperiment"){
-    if(all(dim(imageData(ims)[1,1,,]) ==
-         c(max(xyminmax$x_max),max(xyminmax$y_max)))){
-    
-    image_matrix <- imageData(ims)[features(ims, mz=column),,,]
-    # image_matrix[!is.na(image_matrix)] <- 1
-    image_matrix[is.na(image_matrix)] <- 0
-
-    reg_images <- lapply(seq(dim(image_matrix)[1]), function(x) {
-      
-      im_xmax <- which(rowSums(image_matrix[1,,]) == 0) - 1
-      im_ymax <- which(colSums(image_matrix[1,,]) == 0) - 1
-      
-      immat <- matrix(0, nrow=canvas_xy[1] , ncol=canvas_xy[2])
-
-      x_padding = floor((canvas_xy[1] - xyminmax$x_max[x]) / 2) + 1
-      y_padding = floor((canvas_xy[2] - xyminmax$y_max[x]) / 2) + 1
-      
-      x_width <- x_padding + xyminmax$x_max[x] - 1
-      y_width <- y_padding + xyminmax$y_max[x] - 1
-
-      immat[x_padding:x_width,
-            y_padding:y_width] <- image_matrix[x,
-                                               xyminmax$x_min[x]:xyminmax$x_max[x],
-                                               xyminmax$y_min[x]:xyminmax$y_max[x]]
-
-      return(immat)
-    })
-    return(reg_images)
-    }
-  }
+  # if(class(ims)[1] == "MSImagingExperiment"){
+  #   if(all(dim(imageData(ims)[1,1,,]) ==
+  #        c(max(xyminmax$x_max),max(xyminmax$y_max)))){
+  #   
+  #   image_matrix <- imageData(ims)[features(ims, mz=column),,,]
+  #   # image_matrix[!is.na(image_matrix)] <- 1
+  #   image_matrix[is.na(image_matrix)] <- 0
+  # 
+  #   reg_images <- lapply(seq(dim(image_matrix)[1]), function(x) {
+  #     
+  #     im_xmax <- which(rowSums(image_matrix[1,,]) == 0) - 1
+  #     im_ymax <- which(colSums(image_matrix[1,,]) == 0) - 1
+  #     
+  #     immat <- matrix(0, nrow=canvas_xy[1] , ncol=canvas_xy[2])
+  # 
+  #     x_padding = floor((canvas_xy[1] - xyminmax$x_max[x]) / 2) + 1
+  #     y_padding = floor((canvas_xy[2] - xyminmax$y_max[x]) / 2) + 1
+  #     
+  #     x_width <- x_padding + xyminmax$x_max[x] - 1
+  #     y_width <- y_padding + xyminmax$y_max[x] - 1
+  # 
+  #     immat[x_padding:x_width,
+  #           y_padding:y_width] <- image_matrix[x,
+  #                                              xyminmax$x_min[x]:xyminmax$x_max[x],
+  #                                              xyminmax$y_min[x]:xyminmax$y_max[x]]
+  # 
+  #     return(immat)
+  #   })
+  #   return(reg_images)
+  #   }
+  # }
   
   resultdf$x <- dfs$x
   resultdf$y <- dfs$y
