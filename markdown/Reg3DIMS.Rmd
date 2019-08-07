@@ -1,0 +1,168 @@
+---
+title: "Reg3DIMS Usage & Example"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+> N.B. Before beginning, the `Reg3DIMS` package is only compatible with `Cardinal2` and uses `Cardinal2` classes for all operations. Please see [Cardinal](https://cardinalmsi.org) for installation and usage instructions to load and preprocess your data with Cardinal.
+
+
+##Installation
+This R pacakge is installed from Github using the R `devtools` package. 
+```{r install, eval=FALSE}
+#install devtools package is not already installed...
+install.packages('devtools')
+
+#install Reg3DIMS from github using devtools
+library(devtools)
+devtools::install_github('nhpatterson/Reg3DIMS')
+```
+
+```{r import, message=FALSE, warning=FALSE}
+#load required packages
+library(Cardinal)
+library(RNiftyReg)
+library(EBImage)
+library(Reg3DIMS)
+
+set.seed(0)
+
+```
+
+## Introduction
+
+This procedure requires that `run` desgination within the `MSImageExperiment` be ordered alphanumerically in sequence along the z-axis. In the case of the test data (`MuBr_seq2DIMS`), the 'run' indicates the slide number and section number on the slide in sequence. Care should be taken here to use leading zeroes to avoid sorting issues when there are more than 10 sections or slides in a dataset, i.e. sorting will be 1,10,2 rather than 1,2,3... if there aren't leader zeroes (01,02,03). We also HIGHLY recommend peak picking the data prior to these operations and using a reduced dataset. 
+
+
+```{r}
+#load example data
+data(MuBr_seq2DIMS)
+
+#print levels and show sequence order
+levels(run(MuBr_seq2DIMS))
+```
+
+## Developing images for registration
+Ion images for select m/zs or outputs from `Cardinal`'s `PCA` and `SpatialShrunkenCentroids` analyses can be used as template images for registration. The `get3DTemplateImgs` generates a named list of registration images and pads the images to a user selected `canvas_xy`. This padding is helpful to avoid clipping data that extends beyond the range of the target registration image after alignment.
+
+### PCA
+```{r PCA, eval=FALSE, warning=FALSE,message=FALSE}
+#perform PCA on dataset (n.b. this dataset has been reduced to 5 ion images to fit into github's repository size limits so the PCA analysis isn't the best option)
+MuBr_seq2DIMS.PCA <- PCA(MuBr_seq2DIMS, ncomp=4)
+  
+#generate a list of PCA images from Principal Component 1 for registration
+#the column argument selects out the name of the component in the PCA scores data.frame.
+reg_images <- get3DTemplateImgs(MuBr_seq2DIMS.PCA, canvas_xy = c(700,700), column = 'PC1')
+```
+
+### Ion image
+```{r ri}
+#generate a list of m/z images for registration, if the column argument is numeric, it will attempt to look for an m/z
+reg_images <- get3DTemplateImgs(MuBr_seq2DIMS, canvas_xy = c(700,700), column = 807)
+```
+
+## Developing registration of sequential sections
+
+Sequential sections are registered by selecting a midpoint image (`mid_point`, selected by index in the `reg_images` list) and then iterating out in both directions. In the example below we select the 9th section as the mid-point and thus section 10 is registered to section 9, then section 11 is registered to section (previously registered to section 9), and on until the end. The same goes for the registration towards the first section.
+
+The `reg3DIMS` function allows maximum flexibility for the registration scheme by enabling chaining of multiple registrations with differing degrees of freedom (rigid, affine, nonlinear). The `reg_seq` argument takes registration scope names: rigid (rotation & translation), affine (scaling,rotation,translation, shearing), non-linear (localized deformation). One can chain these schemes together in sequence. This is especially relevant for nonlinear transformations where the images should be initially well aligned before localized warping (i.e., run a `rigid` or `affine` scope prior to `nonlinear`. After specifying a registration chain, scope-specific arguments are passed as a list with the scope name in the `reg_seq_args` argument. see `?niftyreg.linear` and `?niftyreg.nonlinear` for these arguments. We provide good default arguments in the examples below but these may need to be tuned for the inidividual application.
+
+In general, we recommend running a rigid alignment to initialize all other alignments, or use rigid alone. In the initial registration step, the first task is to get the sections as closely aligned as possible and this may take large rotations or translations. If an affine transformation is specified as the first in the chain, these initial steps may create  unrealistically large scaling or shearing errors.
+
+Another issue to address is flipped tissue sections where on section is 'mirror' to the general run of the sequence. This technical artifact is not likely to be well estimated by computational registration but the `reg3DIMS` function allows us to input a series of indices along the sequence (`flip_positions` argument) and the flip that necessary coordinate flip (`flip_type` argument, `1` = horizontal, `2` = veritcal). In the example dataset the 12th image in the sequence has a horizontal flip. If there were more we could use add them like so: `flip_position = c(12,19), flip_type=c(1,2)`. 
+
+### Rigid then affine alignment
+```{r rig_aff, message=FALSE, warning=FALSE}
+
+tforms_rig_aff <- reg3DIMS(reg_images,reg_seq = c('rigid','affine'), 
+                          mid_point = 9, 
+                          flip_positions = c(12), flip_type = c(1),
+                          reg_seq_args = list(
+                            rigid = list(nLevels=5, maxIterations = 10, interpolation = 0),
+                            affine = list(nLevels=5, maxIterations = 10, interpolation = 0)),
+                          plot=F) 
+```
+
+### Rigid then nonlinear alignment
+```{r rig_nl, message=FALSE, warning=FALSE}
+
+tforms_rig_nl <- reg3DIMS(reg_images,reg_seq = c('rigid','nonlinear'), 
+                   mid_point = 9, 
+                   flip_positions = c(12), flip_type = c(1),
+                   reg_seq_args = list(
+                     rigid = list(nLevels=5, maxIterations = 10, interpolation = 0),
+                     nonlinear = list(nBins = 128, finalSpacing = c(60,60,60), 
+                                      spacingUnit=c('voxel'),interpolation = 0)),
+                   plot=F) 
+
+```
+
+During the procedure, `reg3DIMS` will print images showing alignment using green and red for the two images where yellow color shows areas of intensity overlap if `plot = T` in `reg3DIMS`. However, since the sequence has a forward run (mid point to end point) and a backward run (mid point to first point), there will be a noticable gap where the sequence changes when scrolling through the plots.
+
+The output the `reg3DIMS` is a named list containing transformation data as well as all the overlay images for plotting and checking alignment again.
+
+```{r plotcheck}
+
+#run plot over sequence
+plotSeq3Dims <- function(tforms){
+  invisible(lapply(tforms, function(x){
+    if (!is.null(x$overlay)){
+      display(x$overlay)
+    }
+  }))
+}
+
+cat('Rigid --> Affine\n')
+#plot the first five: rigid -> affine
+plotSeq3Dims(tforms_rig_aff[1:5])
+
+cat('Rigid --> Nonlinear\n')
+
+#plot the first five: rigid -> nonlinear
+plotSeq3Dims(tforms_rig_nl[1:5])
+
+```
+
+## Finalizing registration into a 3D `MSImagingExperiment` dataset
+
+The `transform3DIMS` function applies the developed transformations from `reg3DIMS` to all m/z bins in the sequential 2D dataset and returns a named list of `MSImagingExperiment` datasets separated by their respective `run` factor. At this point, it is good to plot an ion image from a couple of sections and make sure things look ok.
+
+Finally, `merge3DIMS` creates a final 3D `MSImagingExperiment` where the z data has been added.
+
+```{r 3dmerge, message=FALSE}
+#apply transformations across the whole data set
+MuBr_seq2DIMS.rigAff <- invisible(transform3DIMS(MuBr_seq2DIMS, tforms_rig_aff))
+MuBr_seq2DIMS.rigNl  <- transform3DIMS(MuBr_seq2DIMS, tforms_rig_nl)
+
+#plot ion images from different depths
+image(MuBr_seq2DIMS.rigAff[[1]], mz=807, xlim=c(0,650),ylim=c(0,650))
+image(MuBr_seq2DIMS.rigAff[[2]], mz=807, xlim=c(0,650),ylim=c(0,650))
+image(MuBr_seq2DIMS.rigAff[[15]], mz=807, xlim=c(0,650),ylim=c(0,650))
+
+#plot ion images from different depths
+image(MuBr_seq2DIMS.rigNl[[1]], mz=807, xlim=c(0,650),ylim=c(0,650))
+image(MuBr_seq2DIMS.rigNl[[2]], mz=807, xlim=c(0,650),ylim=c(0,650))
+image(MuBr_seq2DIMS.rigNl[[15]], mz=807, xlim=c(0,650),ylim=c(0,650))
+
+#merge 3D data, adding z dimension to dataset
+MuBr_3DIMS.rigAff <- merge3DIMS(MuBr_seq2DIMS.rigAff)
+MuBr_3DIMS.rigNl  <- merge3DIMS(MuBr_seq2DIMS.rigNl)
+
+```
+
+## Exporting for external visualization
+
+In most cases the R environment does not provide adequate 3D visualization & analysis tools. Software build explicitly for this purpose is more suitable, especially for interactive visualization. Because of this `Reg3DIMS` provides tools to output the the 3D registered IMS data to the Nifty format. The Nifty format (.nii) permits writing the data to 32-bit float images, which doesn't band quantize or change the MS signal as it would be in non-medical image formats. Secondly, we can include spatial informaiton about the sample in the export, most importantly the voxel scaling. Scaling information is given in `xyz_um` and is a vector of three values indicating the voxel size in microns. In this example dataset, the data was acquired with a lateral resolution of 20 µm and every 2nd 10 µm section was analyzed by IMS, resulting in a 20x20x20 µm voxel, thus we use `xyz_um = c(20,20,20)`. 
+
+The data will be written to the current working directory and will be prepended with a user name fragment in`name_prefix` as well as the _m/z_ of the exported ion. All ions will be exported. In the example scenario we set `name_prefix = 'mubr_3d_test_rig_aff'` and generate files with the name *mubr_3d_test_rig_aff_mz_{m/z value}.nii*.
+
+```{r}
+exportNifti(MuBr_3DIMS.rigAff, xyz_um = c(20,20,20), name_prefix = 'mubr_3d_test_rig_aff')
+exportNifti(MuBr_3DIMS.rigNl, xyz_um = c(20,20,20), name_prefix = 'mubr_3d_test_rig_nl')
+```
+
+# Conclusion
+
+If issues are encountered, please open a github issue or contact [Heath Patterson](mailto:nathan.h.patterson@vanderbilt.edu) directly. 
