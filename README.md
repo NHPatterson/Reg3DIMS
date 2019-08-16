@@ -2,7 +2,7 @@
 
 Register sequential 2D IMS data loaded into `Cardinal` using `NiftyReg`.
 
-`Reg3DIMS` extends [`Cardinal`](https://cardinal.msi.org)'s excellent data structures for 3D IMS experiments registered using [`RNiftyReg`](https://github.com/jonclayden/RNiftyReg). 
+`Reg3DIMS` extends [`Cardinal`](https://cardinalmsi.org)'s excellent data structures for 3D IMS experiments registered using [`RNiftyReg`](https://github.com/jonclayden/RNiftyReg). 
 
 ## Installation 
 
